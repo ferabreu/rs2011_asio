@@ -27,6 +27,7 @@ struct RSAsioInputConfig
 	bool microphone = false;
 	std::optional<bool> enableRefCountHack;
 	std::string wasapiRedirectId; // if non-empty, redirect this WASAPI device ID (or sub-ID) to use this ASIO input
+	std::string friendlyName;     // if non-empty, override the device friendly name reported to the game
 };
 
 // Registry of WASAPI device ID → IMMDevice (ASIO-backed) for audio client redirect.

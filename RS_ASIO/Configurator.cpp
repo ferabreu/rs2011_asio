@@ -450,6 +450,10 @@ static void LoadConfigIni(RSConfig& out)
 					{
 						asioInputConfig.wasapiRedirectId = val;
 					}
+					else if (key == "friendlyname")
+					{
+						asioInputConfig.friendlyName = val;
+					}
 				}
 			}
 		}

@@ -156,6 +156,8 @@ void RSAsioDeviceEnum::UpdateAvailableDevices()
 				config.enableSoftwareMasterVolumeControl = inputCfg.enableSoftwareMasterVolumeControl;
 				config.isMicrophone = inputCfg.microphone;
 				config.enableRefCountHack = inputCfg.enableRefCountHack;
+				if (!inputCfg.friendlyName.empty())
+					config.friendlyName = std::wstring(inputCfg.friendlyName.begin(), inputCfg.friendlyName.end());
 
 				auto device = new RSAsioDevice(*host, id, config);
 				device->SetMasterVolumeLevelScalar((float)inputCfg.softwareMasterVolumePercent / 100.0f);

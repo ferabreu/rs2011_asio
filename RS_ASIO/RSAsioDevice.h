@@ -25,6 +25,9 @@ public:
 		bool enableSoftwareMasterVolumeControl = true;
 		bool isMicrophone = false;
 		std::optional<bool> enableRefCountHack;
+		// If non-empty, reported to the game as the device friendly name via PKEY_Device_FriendlyName.
+		// Use to make RS2011 recognise this ASIO input as the Real Tone Cable without a physical cable.
+		std::wstring friendlyName;
 	};
 
 public:
