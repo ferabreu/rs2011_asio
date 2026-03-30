@@ -41,6 +41,22 @@ The same instructions should work for Rocksmith 2011 as well.
 
 ---
 
+## Disclaimer
+
+**Testing and Limitations:**
+- This software has not been exhaustively tested.
+- Basic functionality has been verified:
+  - with a single Real Tone Cable
+  - in a single Linux environment based on Manjaro Linux, using Steam/Proton, PipeWire, and WineASIO.
+- It may not work in all possible environments and configurations.
+
+**No Warranty:**
+- This software is provided as-is without any warranty of any kind, express or implied.
+- The authors are not responsible for any problems, damages, data loss, or other issues arising from the use of this software.
+- Use at your own risk.
+
+---
+
 ## Additional technical details
 
 Additional information about how RS2011-ASIO works, and how to configure it, can be found in the [technical details document](docs/tech-details.md). This includes information about how the WASAPI redirect works and how to match the `WasapiDevice` setting.
