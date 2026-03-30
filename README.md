@@ -11,7 +11,7 @@ This project aims to add ASIO support to Ubisoft's **Rocksmith (2011)**, allowin
 
 ### Installation and setup
 
-- Copy the files `avrt.dll`, `RS_ASIO.dll` and `RS_ASIO.ini` of [latest release](https://github.com/ferabreu/rs2011_asio/releases/latest) (zip archive release-xxx.zip) to the game folder.
+- Copy the files `avrt.dll`, `RS_ASIO.dll` and `RS_ASIO.ini` of [latest release](https://github.com/ferabreu/rs2011-asio/releases/latest) (zip archive release-xxx.zip) to the game folder.
   - Only the Steam version of Rocksmith 2011 is currently supported. You can find the local folder of the game by right clicking on it in your Steam library, and selecting menu "Manage" -> "Browse local files"
 - The `RS_ASIO.ini` file is pre-configured to be used with the game running on Linux, with the usual Proton stack and WineASIO.
 - Make sure `Rocksmith.ini` is set to run with `ExclusiveMode=1`. If in doubt, use default settings.
