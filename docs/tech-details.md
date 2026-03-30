@@ -1,4 +1,4 @@
-# Additional technical details about RS2011 ASIO
+# Additional technical details about RS2011-ASIO
 
 ## RS_ASIO.ini configuration
 

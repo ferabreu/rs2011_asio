@@ -1,4 +1,4 @@
-# RS2011 ASIO
+# RS2011-ASIO
 
 This project aims to add ASIO support to Ubisoft's **Rocksmith (2011)**, allowing the game to be run on Linux, using Steam/Proton, Pipewire (or JACK), and WineASIO.
 
@@ -15,7 +15,7 @@ This project aims to add ASIO support to Ubisoft's **Rocksmith (2011)**, allowin
   - Only the Steam version of Rocksmith 2011 is currently supported. You can find the local folder of the game by right clicking on it in your Steam library, and selecting menu "Manage" -> "Browse local files"
 - The `RS_ASIO.ini` file is pre-configured to be used with the game running on Linux, with the usual Proton stack and WineASIO.
 - Make sure `Rocksmith.ini` is set to run with `ExclusiveMode=1`. If in doubt, use default settings.
-- Make sure your interface clock is set to 48kHz. RS2011 ASIO will try to request 48kHz mode, but you need to set it manually in Pipewire or JACK.
+- Make sure your interface clock is set to 48kHz. RS2011-ASIO will try to request 48kHz mode, but you need to set it manually in Pipewire or JACK.
 - An `RS_ASIO.log` file is generated inside the game directory which may help diagnosing issues.
 
 ### Removal
@@ -43,7 +43,7 @@ The same instructions should work for Rocksmith 2011 as well.
 
 ## Additional technical details
 
-Additional information about how RS2011 ASIO works, and how to configure it, can be found in the [technical details document](docs/tech-details.md). This includes information about how the WASAPI redirect works and how to match the `WasapiDevice` setting.
+Additional information about how RS2011-ASIO works, and how to configure it, can be found in the [technical details document](docs/tech-details.md). This includes information about how the WASAPI redirect works and how to match the `WasapiDevice` setting.
 
 ## Credits
 
