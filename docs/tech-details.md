@@ -81,16 +81,42 @@ Both games use WASAPI exclusive mode for audio output. RS ASIO intercepts the WA
 
 This is where RS2011 and RS2014 diverge fundamentally.
 
-**RS2014** uses WASAPI exclusive mode for the Real Tone Cable but does so through normal COM device enumeration, which RS ASIO already intercepts and redirects to ASIO.
+**RS2014** selects its guitar input through the same COM device enumeration that RS ASIO already intercepts. When RS2014 asks for a list of WASAPI capture devices, RS ASIO returns its own fake ASIO-backed devices in place of real ones, and the game picks from those.
 
-**RS2011** uses WASAPI exclusive mode in **polling mode** — it does not request event-driven callbacks (`AUDCLNT_STREAMFLAGS_EVENTCALLBACK`), instead calling `GetCurrentPadding` in a loop to detect when new audio data is available. Under Wine/Proton, this combination causes RS ASIO to incorrectly warn that the game is not using WASAPI. This warning is suppressed for RS2011.
+**RS2011** does not go through device enumeration for input. Instead, it scans the system for WASAPI capture devices at startup, identifies the Real Tone Cable by its specific WASAPI device path (a `{flow}.{endpoint-GUID}` string assigned by Wine/Proton), and then opens it **directly by path** in exclusive mode. It never asks for a list — it already knows the address it wants.
 
-More importantly, RS2011 **does not select its guitar input through normal WASAPI device enumeration**. Instead, it identifies the Real Tone Cable by its specific WASAPI device path (a `{flow}.{endpoint-GUID}` string assigned by Wine/Proton), opens it directly in exclusive mode, and begins polling. Wine/Proton's WASAPI implementation rejects all audio formats offered by the game for the Real Tone Cable in exclusive mode — making the cable unusable without RS ASIO.
+RS2011 also uses WASAPI in **polling mode**: rather than requesting event-driven callbacks (`AUDCLNT_STREAMFLAGS_EVENTCALLBACK`), it calls `GetCurrentPadding` in a loop to detect when new audio samples are available. Under Wine/Proton, RS ASIO would otherwise show a spurious "Did you set `Win32UltraLowLatencyMode=1`?" warning dialog when it sees a client that doesn't use event callbacks; this warning is suppressed for RS2011 because that `Rocksmith.ini` setting does not exist in the 2011 game.
+
+Wine/Proton's WASAPI implementation rejects all audio formats offered by the game for the Real Tone Cable in exclusive mode — making the cable unusable for audio capture without RS ASIO.
+
+### Why the Real Tone Cable is required
+
+The cable is required for **enumeration**, not for audio. RS2011 only opens a capture session when it finds and recognises the Real Tone Cable WASAPI device during its startup scan. Without the cable physically connected, Wine never enumerates that endpoint, so there is nothing for RS ASIO to intercept.
+
+Once the game activates the cable's endpoint, RS ASIO redirects that activation to an ASIO-backed audio client. The **actual guitar audio then comes from WineASIO channel 0**, which can be fed from any physical interface through the PipeWire or JACK patchbay — exactly as with RS2014. The Real Tone Cable's audio signal is never used for anything.
+
+In summary: the cable's role is only to make Wine expose a WASAPI device with the right path. The audio path is:
+
+```
+Guitar → your audio interface → WineASIO (JACK/PipeWire) → RS2011-ASIO → RS2011
+```
 
 ### The RS ASIO solution for RS2011
 
-RS ASIO intercepts `IMMDevice::Activate` for IAudioClient. When the game activates the Real Tone Cable's WASAPI device, RS ASIO detects the match (via `WasapiDevice=` in the INI) and returns an ASIO-backed `RSAsioAudioClient` instead of Wine's broken implementation. The game receives audio from the configured ASIO input channel transparently.
+RS ASIO intercepts `IMMDevice::Activate` for `IAudioClient`. When the game activates the Real Tone Cable's WASAPI device, RS ASIO detects the match (via `WasapiDevice=` in the INI) and returns an ASIO-backed `RSAsioAudioClient` instead of Wine's broken implementation. The game receives audio from the configured ASIO input channel transparently.
 
 Audio format negotiation is also handled: RS2011 offers float32 mono as its preferred format, which is compatible with WineASIO's native `ASIOSTFloat32LSB` type — no conversion needed.
 
-The ASIO host is shared between output (already running for music playback) and input, using the same buffer size and sample rate. Only sample rate and buffer size are compared when the second client joins the shared host — format tag differences between output (PCM16) and input (float32 extensible) are intentionally ignored.
+The ASIO host is shared between output (already running for music playback) and input, using the same buffer size and sample rate. Only sample rate and buffer size are compared when a second client joins the shared host — format tag differences between output (PCM16) and input (float32 extensible) are intentionally ignored.
+
+### The IAT patching approach
+
+RS2014's executable code is readable at load time, so RS ASIO finds injection points by scanning for known byte patterns. RS2011's executable is encrypted on disk by a custom packer stub (`PSFD00` section) and only decrypted in memory at runtime. By that time, RS ASIO's DLL is already loaded, making byte-pattern scanning impractical.
+
+Instead, RS2011 support patches the **Import Address Table (IAT)** directly. The IAT is part of the `.rdata` section, which is not encrypted, and is populated by the Windows loader before any DLL code runs. RS ASIO overwrites the IAT slots for the three COM functions RS2011 uses to enumerate and access WASAPI devices:
+
+- `CoCreateInstance` — used to create the WASAPI device enumerator
+- `CoMarshalInterThreadInterfaceInStream` — used to pass COM objects across threads
+- `CoGetInterfaceAndReleaseStream` — used to retrieve those objects on the other thread
+
+Because RS2011 does not use ASLR (its image base is fixed at `0x00400000`), the IAT slot addresses are constant across all runs, which makes this approach reliable.
