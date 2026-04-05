@@ -55,11 +55,11 @@ HRESULT STDMETHODCALLTYPE DebugWrapperDevicePropertyStore::GetAt(DWORD iProp, PR
 
 HRESULT STDMETHODCALLTYPE DebugWrapperDevicePropertyStore::GetValue(REFPROPERTYKEY key, PROPVARIANT *pv)
 {
-	//rslog::info_ts() << m_DeviceId << " " __FUNCTION__ " - key: " << key << std::endl;
+	rslog::info_ts() << m_DeviceId << " " << __FUNCTION__ << " - key: " << key << std::endl;
 
 	HRESULT hr = m_RealPropertyStore.GetValue(key, pv);
 	DEBUG_PRINT_HR(hr);
-	/*
+
 	if (hr == S_OK)
 	{
 		if (pv->vt == VT_EMPTY)
@@ -77,12 +77,16 @@ HRESULT STDMETHODCALLTYPE DebugWrapperDevicePropertyStore::GetValue(REFPROPERTYK
 		else if (key == PKEY_Device_FriendlyName)
 		{
 			if (pv->vt == VT_LPWSTR)
-				rslog::info_ts() << "  friendly name: " << std::dec << pv->pwszVal << std::endl;
+				rslog::info_ts() << "  friendly name: " << pv->pwszVal << std::endl;
 			else if (pv->vt == VT_LPSTR)
-				rslog::info_ts() << "  friendly name: " << std::dec << pv->pszVal << std::endl;
+				rslog::info_ts() << "  friendly name: " << pv->pszVal << std::endl;
+		}
+		else if (key == PKEY_Device_DeviceIdHiddenKey1 || key == PKEY_Device_DeviceIdHiddenKey2)
+		{
+			if (pv->vt == VT_LPWSTR)
+				rslog::info_ts() << "  device id key: " << pv->pwszVal << std::endl;
 		}
 	}
-	*/
 
 	return hr;
 }
