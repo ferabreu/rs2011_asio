@@ -59,7 +59,7 @@ static bool PatchIATEntry(DWORD rva, void* replacementFn, const char* fnName)
 static HRESULT STDAPICALLTYPE Patched_CoMarshalInterThreadInterfaceInStream(
     REFIID riid, IUnknown* pUnk, IStream** ppStm)
 {
-	rslog::info_ts() << "Patched_CoMarshalInterThreadInterfaceInStream called" << std::endl;
+	rslog::info_ts() << "Patched_CoMarshalInterThreadInterfaceInStream called - riid: " << riid << " pUnk: " << pUnk << std::endl;
 	// Return the interface directly as the "stream" — PortAudio will read it back
 	// via Patched_CoGetInterfaceAndReleaseStream below.
 	if (!ppStm)
@@ -73,7 +73,7 @@ static HRESULT STDAPICALLTYPE Patched_CoMarshalInterThreadInterfaceInStream(
 static HRESULT STDAPICALLTYPE Patched_CoGetInterfaceAndReleaseStream(
     IStream* pStm, REFIID riid, void** ppv)
 {
-	rslog::info_ts() << "Patched_CoGetInterfaceAndReleaseStream called" << std::endl;
+	rslog::info_ts() << "Patched_CoGetInterfaceAndReleaseStream called - riid: " << riid << " pStm: " << pStm << std::endl;
 	if (!ppv)
 		return E_POINTER;
 	// The "stream" is actually the interface pointer stored by Patched_CoMarshalInterThreadInterfaceInStream.

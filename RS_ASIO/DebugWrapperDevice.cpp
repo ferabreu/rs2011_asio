@@ -165,12 +165,13 @@ HRESULT STDMETHODCALLTYPE DebugWrapperDevice::OpenPropertyStore(DWORD stgmAccess
 HRESULT STDMETHODCALLTYPE DebugWrapperDevice::GetId(LPWSTR *ppstrId)
 {
 	HRESULT hr = m_RealDevice.GetId(ppstrId);
-	DEBUG_PRINT_HR(hr);
+	rslog::info_ts() << m_Id << " " << __FUNCTION__ << " - hr: " << HResultToStr(hr) << std::endl;
 	return hr;
 }
 
 HRESULT STDMETHODCALLTYPE DebugWrapperDevice::GetState(DWORD *pdwState)
 {
+	rslog::info_ts() << m_Id << " " << __FUNCTION__ << std::endl;
 	HRESULT hr = m_RealDevice.GetState(pdwState);
 	DEBUG_PRINT_HR(hr);
 	return hr;
