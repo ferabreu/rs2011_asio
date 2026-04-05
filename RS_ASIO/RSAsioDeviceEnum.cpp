@@ -143,8 +143,11 @@ void RSAsioDeviceEnum::UpdateAvailableDevices()
 			AsioSharedHost* host = fnFindOrCreateAsioHost(inputCfg.asioDriverName);
 			if (host)
 			{
-				wchar_t id[64]{};
-				swprintf(id, 63, L"{ASIO IN %i}", inputIdx);
+				wchar_t defaultId[64]{};
+				swprintf(defaultId, 63, L"{ASIO IN %i}", inputIdx);
+				const std::wstring deviceId = inputCfg.wasapiId.empty()
+					? std::wstring(defaultId)
+					: std::wstring(inputCfg.wasapiId.begin(), inputCfg.wasapiId.end());
 
 				RSAsioDevice::Config config;
 				config.isOutput = false;
@@ -156,12 +159,16 @@ void RSAsioDeviceEnum::UpdateAvailableDevices()
 				config.enableSoftwareMasterVolumeControl = inputCfg.enableSoftwareMasterVolumeControl;
 				config.isMicrophone = inputCfg.microphone;
 				config.enableRefCountHack = inputCfg.enableRefCountHack;
+				// When wasapiId is set (cable-free mode), wasapiRedirectId doubles as the friendly name
+				// reported to the game. When wasapiId is absent, wasapiRedirectId is a redirect pattern.
+				if (!inputCfg.wasapiId.empty() && !inputCfg.wasapiRedirectId.empty())
+					config.friendlyName = std::wstring(inputCfg.wasapiRedirectId.begin(), inputCfg.wasapiRedirectId.end());
 
-				auto device = new RSAsioDevice(*host, id, config);
+				auto device = new RSAsioDevice(*host, deviceId, config);
 				device->SetMasterVolumeLevelScalar((float)inputCfg.softwareMasterVolumePercent / 100.0f);
 
-				// Register WASAPI redirect if configured
-				if (!inputCfg.wasapiRedirectId.empty())
+				// Register WASAPI redirect only in redirect mode (wasapiId not set)
+				if (inputCfg.wasapiId.empty() && !inputCfg.wasapiRedirectId.empty())
 				{
 					const std::wstring wRedirectId(inputCfg.wasapiRedirectId.begin(), inputCfg.wasapiRedirectId.end());
 					RegisterWasapiRedirect(wRedirectId, device);

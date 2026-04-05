@@ -25,6 +25,7 @@ public:
 		bool enableSoftwareMasterVolumeControl = true;
 		bool isMicrophone = false;
 		std::optional<bool> enableRefCountHack;
+		std::wstring friendlyName; // if non-empty, reported as PKEY_Device_FriendlyName instead of the device ID
 	};
 
 public:

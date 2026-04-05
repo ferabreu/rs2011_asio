@@ -107,8 +107,14 @@ HRESULT STDMETHODCALLTYPE RSAsioDevicePropertyStore::GetValue(REFPROPERTYKEY key
 		}
 		else if (key == PKEY_Device_FriendlyName)
 		{
-			if (SUCCEEDED(m_AsioDevice.GetId(&pv->pwszVal)))
+			const std::wstring& name = m_AsioDevice.GetConfig().friendlyName.empty()
+				? m_AsioDevice.GetIdRef()
+				: m_AsioDevice.GetConfig().friendlyName;
+			const size_t bytes = (name.size() + 1) * sizeof(wchar_t);
+			pv->pwszVal = (LPWSTR)CoTaskMemAlloc(bytes);
+			if (pv->pwszVal)
 			{
+				memcpy(pv->pwszVal, name.c_str(), bytes);
 				pv->vt = VT_LPWSTR;
 			}
 		}

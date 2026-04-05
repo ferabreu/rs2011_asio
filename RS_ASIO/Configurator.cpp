@@ -450,6 +450,10 @@ static void LoadConfigIni(RSConfig& out)
 					{
 						asioInputConfig.wasapiRedirectId = val;
 					}
+					else if (key == "wasapiid")
+					{
+						asioInputConfig.wasapiId = val;
+					}
 				}
 			}
 		}
