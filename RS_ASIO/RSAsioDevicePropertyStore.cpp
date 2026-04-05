@@ -91,7 +91,11 @@ HRESULT STDMETHODCALLTYPE RSAsioDevicePropertyStore::GetValue(REFPROPERTYKEY key
 				wfe->Format.nBlockAlign = wfe->Format.nChannels * (wfe->Format.wBitsPerSample / 8);
 				wfe->Format.nAvgBytesPerSec = wfe->Format.nBlockAlign * wfe->Format.nSamplesPerSec;
 				wfe->Format.cbSize = 22;
-				wfe->SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
+				// Capture devices use IEEE_FLOAT to match the format RS2011 offers when initialising
+				// the Real Tone Cable (mono float32). Output devices use PCM (RS2014 compatibility).
+				wfe->SubFormat = m_AsioDevice.GetConfig().isOutput
+					? KSDATAFORMAT_SUBTYPE_PCM
+					: KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
 				wfe->Samples.wSamplesPerBlock = 24;
 				wfe->dwChannelMask = 0;
 

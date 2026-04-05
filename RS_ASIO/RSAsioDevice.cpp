@@ -93,7 +93,11 @@ AsioSharedHost& RSAsioDevice::GetAsioHost()
 
 unsigned RSAsioDevice::GetNumWasapiChannels() const
 {
-	return std::max<unsigned>(m_Config.numAsioChannels, 2);
+	// Outputs require at least 2 channels (stereo). Inputs report exactly what is configured,
+	// so that mono capture devices (e.g. Real Tone Cable) are reported correctly.
+	if (m_Config.isOutput)
+		return std::max<unsigned>(m_Config.numAsioChannels, 2);
+	return m_Config.numAsioChannels;
 }
 
 bool RSAsioDevice::SetEndpointVolumeLevelScalar(float fLevel)
