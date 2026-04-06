@@ -157,7 +157,9 @@ void RSAsioDeviceEnum::UpdateAvailableDevices()
 				config.customBufferSize = m_Config.customBufferSize;
 				config.enableSoftwareEndpointVolmeControl = inputCfg.enableSoftwareEndpointVolumeControl;
 				config.enableSoftwareMasterVolumeControl = inputCfg.enableSoftwareMasterVolumeControl;
-				config.isMicrophone = inputCfg.microphone;
+				// Cable-free mode: force Microphone FormFactor so RS2011 selects this device
+				// for guitar capture (the game's cable heuristic scans for FormFactor=4).
+				config.isMicrophone = inputCfg.microphone || !inputCfg.wasapiId.empty();
 				config.enableRefCountHack = inputCfg.enableRefCountHack;
 				// When wasapiId is set (cable-free mode), wasapiRedirectId doubles as the friendly name
 				// reported to the game. When wasapiId is absent, wasapiRedirectId is a redirect pattern.

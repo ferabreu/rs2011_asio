@@ -367,7 +367,9 @@ static BOOL WINAPI Patched_SetupDiGetDeviceInterfaceAlias(
 static UINT WINAPI Patched_waveInGetNumDevs()
 {
 	UINT real = waveInGetNumDevs();
-	return real + 1;
+	UINT result = real + 1;
+	rslog::info_ts() << "Patched_waveInGetNumDevs - real: " << real << " returning: " << result << std::endl;
+	return result;
 }
 
 static MMRESULT WINAPI Patched_waveInGetDevCapsA(UINT_PTR uDeviceID, LPWAVEINCAPSA pwic, UINT cbwic)
