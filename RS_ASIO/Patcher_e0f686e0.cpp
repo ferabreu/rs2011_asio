@@ -3,6 +3,12 @@
 #include "Patcher.h"
 #include <setupapi.h>
 #pragma comment(lib, "setupapi.lib")
+#include <mmsystem.h>
+#pragma comment(lib, "winmm.lib")
+
+#ifndef WAVE_FORMAT_48M16
+#define WAVE_FORMAT_48M16 0x00004000
+#endif
 
 // Patch code for Rocksmith (2011), CRC32 0xe0f686e0
 //
@@ -49,6 +55,17 @@ static const DWORD IAT_RVA_SetupDiEnumDeviceInterfaces      = 0x0088d2d8;
 
 static const DWORD IAT_RVA_RegQueryValueExW = 0x0088d000;
 static const DWORD IAT_RVA_RegCloseKey      = 0x0088d004;
+
+// WINMM.dll — waveIn (MME audio capture used for guitar input)
+static const DWORD IAT_RVA_waveInGetNumDevs    = 0x0088d3fc;
+static const DWORD IAT_RVA_waveInGetDevCapsA   = 0x0088d400;
+static const DWORD IAT_RVA_waveInOpen          = 0x0088d3e4;
+static const DWORD IAT_RVA_waveInStart         = 0x0088d3dc;
+static const DWORD IAT_RVA_waveInStop          = 0x0088d3e8;
+static const DWORD IAT_RVA_waveInClose         = 0x0088d3e0;
+static const DWORD IAT_RVA_waveInAddBuffer     = 0x0088d3d8;
+static const DWORD IAT_RVA_waveInPrepareHeader = 0x0088d3c4;
+static const DWORD IAT_RVA_waveInGetID         = 0x0088d3d4;
 
 // Sentinel value used as an HDEVINFO handle for our fake cable device set.
 // Must not collide with real heap pointers; RS2011 is 32-bit and heap starts well
@@ -320,8 +337,7 @@ static BOOL WINAPI Patched_SetupDiGetDeviceRegistryPropertyW(
 
 static BOOL WINAPI Patched_SetupDiGetDeviceInterfaceAlias(
     HDEVINFO DeviceInfoSet, PSP_DEVICE_INTERFACE_DATA DeviceInterfaceData,
-    const GUID* AliasInterfaceClassGuid, PSP_DEVICE_INTERFACE_DATA AliasDeviceInterfaceData)
-{
+    const GUID* AliasInterfaceClassGuid, PSP_DEVICE_INTERFACE_DATA AliasDeviceInterfaceData){
 	if (AliasInterfaceClassGuid)
 		rslog::info_ts() << "Patched_SetupDiGetDeviceInterfaceAlias - AliasGuid: " << *AliasInterfaceClassGuid << std::endl;
 	else
@@ -340,6 +356,100 @@ static BOOL WINAPI Patched_SetupDiGetDeviceInterfaceAlias(
 		AliasDeviceInterfaceData->Reserved = 0;
 	}
 	return TRUE;
+}
+
+// ---- WinMM waveIn fakes ---------------------------------------------------
+// RS2011 uses the legacy MME waveIn API (not WASAPI) for guitar capture.
+// We inject a fake "Rocksmith Guitar Adapter Mono" device at the end of the
+// waveIn device list so the game finds the cable by name, then redirect
+// waveInOpen for that fake device to WAVE_MAPPER (the system default input).
+
+static UINT WINAPI Patched_waveInGetNumDevs()
+{
+	UINT real = waveInGetNumDevs();
+	return real + 1;
+}
+
+static MMRESULT WINAPI Patched_waveInGetDevCapsA(UINT_PTR uDeviceID, LPWAVEINCAPSA pwic, UINT cbwic)
+{
+	rslog::info_ts() << "Patched_waveInGetDevCapsA - uDeviceID: " << uDeviceID << std::endl;
+	UINT fakeCableID = waveInGetNumDevs();
+	if ((UINT)uDeviceID == fakeCableID)
+	{
+		if (!pwic || cbwic < sizeof(WAVEINCAPSA))
+			return MMSYSERR_INVALPARAM;
+		ZeroMemory(pwic, cbwic);
+		pwic->vDriverVersion = 0x0001;
+		strncpy_s(pwic->szPname, sizeof(pwic->szPname), "Rocksmith Guitar Adapter Mono", _TRUNCATE);
+		pwic->dwFormats = WAVE_FORMAT_4M16 | WAVE_FORMAT_48M16;
+		pwic->wChannels = 1;
+		rslog::info_ts() << "  -> fake cable caps returned" << std::endl;
+		return MMSYSERR_NOERROR;
+	}
+	MMRESULT r = waveInGetDevCapsA(uDeviceID, pwic, cbwic);
+	if (r == MMSYSERR_NOERROR && pwic)
+		rslog::info_ts() << "  -> szPname: " << pwic->szPname << std::endl;
+	return r;
+}
+
+static MMRESULT WINAPI Patched_waveInOpen(
+	LPHWAVEIN phwi, UINT uDeviceID, LPCWAVEFORMATEX pwfx,
+	DWORD_PTR dwCallback, DWORD_PTR dwCallbackInstance, DWORD fdwOpen)
+{
+	UINT fakeCableID = waveInGetNumDevs();
+	if (pwfx)
+		rslog::info_ts() << "Patched_waveInOpen - uDeviceID: " << uDeviceID
+		                 << " (fakeCableID=" << fakeCableID << ")"
+		                 << "  fmt: ch=" << pwfx->nChannels
+		                 << " sr=" << pwfx->nSamplesPerSec
+		                 << " bits=" << pwfx->wBitsPerSample
+		                 << " tag=" << pwfx->wFormatTag << std::endl;
+	else
+		rslog::info_ts() << "Patched_waveInOpen - uDeviceID: " << uDeviceID
+		                 << " (fakeCableID=" << fakeCableID << ") - no format" << std::endl;
+
+	if ((UINT)uDeviceID == fakeCableID && uDeviceID != WAVE_MAPPER)
+	{
+		rslog::info_ts() << "  -> redirecting fake cable to WAVE_MAPPER" << std::endl;
+		MMRESULT r = waveInOpen(phwi, WAVE_MAPPER, pwfx, dwCallback, dwCallbackInstance, fdwOpen);
+		rslog::info_ts() << "  -> WAVE_MAPPER result: " << r << std::endl;
+		return r;
+	}
+	return waveInOpen(phwi, uDeviceID, pwfx, dwCallback, dwCallbackInstance, fdwOpen);
+}
+
+static MMRESULT WINAPI Patched_waveInStart(HWAVEIN hwi)
+{
+	rslog::info_ts() << "Patched_waveInStart" << std::endl;
+	return waveInStart(hwi);
+}
+
+static MMRESULT WINAPI Patched_waveInStop(HWAVEIN hwi)
+{
+	rslog::info_ts() << "Patched_waveInStop" << std::endl;
+	return waveInStop(hwi);
+}
+
+static MMRESULT WINAPI Patched_waveInClose(HWAVEIN hwi)
+{
+	rslog::info_ts() << "Patched_waveInClose" << std::endl;
+	return waveInClose(hwi);
+}
+
+static MMRESULT WINAPI Patched_waveInAddBuffer(HWAVEIN hwi, LPWAVEHDR pwh, UINT cbwh)
+{
+	return waveInAddBuffer(hwi, pwh, cbwh);
+}
+
+static MMRESULT WINAPI Patched_waveInPrepareHeader(HWAVEIN hwi, LPWAVEHDR pwh, UINT cbwh)
+{
+	return waveInPrepareHeader(hwi, pwh, cbwh);
+}
+
+static MMRESULT WINAPI Patched_waveInGetID(HWAVEIN hwi, LPUINT puDeviceID)
+{
+	rslog::info_ts() << "Patched_waveInGetID" << std::endl;
+	return waveInGetID(hwi, puDeviceID);
 }
 
 void PatchOriginalCode_e0f686e0()
@@ -391,6 +501,34 @@ void PatchOriginalCode_e0f686e0()
 	ok &= PatchIATEntry(IAT_RVA_RegCloseKey,
 	                    reinterpret_cast<void*>(&Patched_RegCloseKey),
 	                    "RegCloseKey");
+
+	ok &= PatchIATEntry(IAT_RVA_waveInGetNumDevs,
+	                    reinterpret_cast<void*>(&Patched_waveInGetNumDevs),
+	                    "waveInGetNumDevs");
+	ok &= PatchIATEntry(IAT_RVA_waveInGetDevCapsA,
+	                    reinterpret_cast<void*>(&Patched_waveInGetDevCapsA),
+	                    "waveInGetDevCapsA");
+	ok &= PatchIATEntry(IAT_RVA_waveInOpen,
+	                    reinterpret_cast<void*>(&Patched_waveInOpen),
+	                    "waveInOpen");
+	ok &= PatchIATEntry(IAT_RVA_waveInStart,
+	                    reinterpret_cast<void*>(&Patched_waveInStart),
+	                    "waveInStart");
+	ok &= PatchIATEntry(IAT_RVA_waveInStop,
+	                    reinterpret_cast<void*>(&Patched_waveInStop),
+	                    "waveInStop");
+	ok &= PatchIATEntry(IAT_RVA_waveInClose,
+	                    reinterpret_cast<void*>(&Patched_waveInClose),
+	                    "waveInClose");
+	ok &= PatchIATEntry(IAT_RVA_waveInAddBuffer,
+	                    reinterpret_cast<void*>(&Patched_waveInAddBuffer),
+	                    "waveInAddBuffer");
+	ok &= PatchIATEntry(IAT_RVA_waveInPrepareHeader,
+	                    reinterpret_cast<void*>(&Patched_waveInPrepareHeader),
+	                    "waveInPrepareHeader");
+	ok &= PatchIATEntry(IAT_RVA_waveInGetID,
+	                    reinterpret_cast<void*>(&Patched_waveInGetID),
+	                    "waveInGetID");
 
 	if (!ok)
 	{
