@@ -56,6 +56,13 @@ static const DWORD IAT_RVA_SetupDiEnumDeviceInterfaces      = 0x0088d2d8;
 static const DWORD IAT_RVA_RegQueryValueExW = 0x0088d000;
 static const DWORD IAT_RVA_RegCloseKey      = 0x0088d004;
 
+// KERNEL32.dll — file/device access (game opens the cable device path via KS)
+static const DWORD IAT_RVA_CreateFileA    = 0x0088d0e8;
+static const DWORD IAT_RVA_CreateFileW    = 0x0088d128;
+static const DWORD IAT_RVA_CloseHandle    = 0x0088d0c8;
+static const DWORD IAT_RVA_DeviceIoControl= 0x0088d070;
+static const DWORD IAT_RVA_ReadFile       = 0x0088d124;
+
 // WINMM.dll — waveIn (MME audio capture used for guitar input)
 static const DWORD IAT_RVA_waveInGetNumDevs    = 0x0088d3fc;
 static const DWORD IAT_RVA_waveInGetDevCapsA   = 0x0088d400;
@@ -74,6 +81,9 @@ static const HDEVINFO FAKE_DEVINFO = reinterpret_cast<HDEVINFO>(static_cast<ULON
 
 // Sentinel HKEY for our fake cable's device interface registry key.
 static const HKEY FAKE_CABLE_HKEY = reinterpret_cast<HKEY>(static_cast<ULONG_PTR>(0xC0FFEE02));
+
+// Sentinel HANDLE for our fake KS capture device (opened via CreateFileA/W).
+static const HANDLE FAKE_KS_HANDLE = reinterpret_cast<HANDLE>(static_cast<ULONG_PTR>(0xC0FFEE03));
 
 // The WASAPI endpoint ID for the fake cable device - written under every plausible
 // value name so whatever key name the game reads, it will get the right ID.
@@ -358,6 +368,91 @@ static BOOL WINAPI Patched_SetupDiGetDeviceInterfaceAlias(
 	return TRUE;
 }
 
+// ---- Kernel streaming (KS) fakes ------------------------------------------
+// RS2011 opens the cable's device interface path (from SetupDiGetDeviceInterfaceDetailW)
+// via CreateFileA/W, then communicates with the USB audio driver using DeviceIoControl
+// (KS property/pin IOCTLs) and ReadFile (KS streaming).
+// We intercept these for our fake device path and return a sentinel handle so the game
+// doesn't fail when the path doesn't exist.
+
+static bool IsFakeDevicePath(LPCSTR lpFileName)
+{
+	if (!lpFileName) return false;
+	// Match "USB#VID_12BA&PID_00FF" case-insensitively
+	return (strstr(lpFileName, "VID_12BA") != nullptr || strstr(lpFileName, "vid_12ba") != nullptr);
+}
+
+static bool IsFakeDevicePathW(LPCWSTR lpFileName)
+{
+	if (!lpFileName) return false;
+	return (wcsstr(lpFileName, L"VID_12BA") != nullptr || wcsstr(lpFileName, L"vid_12ba") != nullptr);
+}
+
+static HANDLE WINAPI Patched_CreateFileA(
+	LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
+	LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition,
+	DWORD dwFlagsAndAttributes, HANDLE hTemplateFile)
+{
+	if (IsFakeDevicePath(lpFileName))
+	{
+		rslog::info_ts() << "Patched_CreateFileA (fake cable path): " << (lpFileName ? lpFileName : "(null)") << std::endl;
+		return FAKE_KS_HANDLE;
+	}
+	return CreateFileA(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes,
+	                   dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+}
+
+static HANDLE WINAPI Patched_CreateFileW(
+	LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
+	LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition,
+	DWORD dwFlagsAndAttributes, HANDLE hTemplateFile)
+{
+	if (IsFakeDevicePathW(lpFileName))
+	{
+		rslog::info_ts() << "Patched_CreateFileW (fake cable path)" << std::endl;
+		return FAKE_KS_HANDLE;
+	}
+	return CreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes,
+	                   dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+}
+
+static BOOL WINAPI Patched_CloseHandle(HANDLE hObject)
+{
+	if (hObject == FAKE_KS_HANDLE)
+		return TRUE;
+	return CloseHandle(hObject);
+}
+
+static BOOL WINAPI Patched_DeviceIoControl(
+	HANDLE hDevice, DWORD dwIoControlCode, LPVOID lpInBuffer, DWORD nInBufferSize,
+	LPVOID lpOutBuffer, DWORD nOutBufferSize, LPDWORD lpBytesReturned, LPOVERLAPPED lpOverlapped)
+{
+	if (hDevice == FAKE_KS_HANDLE)
+	{
+		rslog::info_ts() << "Patched_DeviceIoControl (fake KS) - ioctl: 0x" << std::hex << dwIoControlCode << std::dec
+		                 << " inSize: " << nInBufferSize << " outSize: " << nOutBufferSize << std::endl;
+		// Fail gracefully — the game will fall back to another path or show the cable error.
+		// In a future iteration we can respond to specific KS IOCTLs here.
+		SetLastError(ERROR_NOT_SUPPORTED);
+		return FALSE;
+	}
+	return DeviceIoControl(hDevice, dwIoControlCode, lpInBuffer, nInBufferSize,
+	                       lpOutBuffer, nOutBufferSize, lpBytesReturned, lpOverlapped);
+}
+
+static BOOL WINAPI Patched_ReadFile(
+	HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead,
+	LPDWORD lpNumberOfBytesRead, LPOVERLAPPED lpOverlapped)
+{
+	if (hFile == FAKE_KS_HANDLE)
+	{
+		rslog::info_ts() << "Patched_ReadFile (fake KS) - bytes: " << nNumberOfBytesToRead << std::endl;
+		SetLastError(ERROR_NOT_SUPPORTED);
+		return FALSE;
+	}
+	return ReadFile(hFile, lpBuffer, nNumberOfBytesToRead, lpNumberOfBytesRead, lpOverlapped);
+}
+
 // ---- WinMM waveIn fakes ---------------------------------------------------
 // RS2011 uses the legacy MME waveIn API (not WASAPI) for guitar capture.
 // We inject a fake "Rocksmith Guitar Adapter Mono" device at the end of the
@@ -503,6 +598,22 @@ void PatchOriginalCode_e0f686e0()
 	ok &= PatchIATEntry(IAT_RVA_RegCloseKey,
 	                    reinterpret_cast<void*>(&Patched_RegCloseKey),
 	                    "RegCloseKey");
+
+	ok &= PatchIATEntry(IAT_RVA_CreateFileA,
+	                    reinterpret_cast<void*>(&Patched_CreateFileA),
+	                    "CreateFileA");
+	ok &= PatchIATEntry(IAT_RVA_CreateFileW,
+	                    reinterpret_cast<void*>(&Patched_CreateFileW),
+	                    "CreateFileW");
+	ok &= PatchIATEntry(IAT_RVA_CloseHandle,
+	                    reinterpret_cast<void*>(&Patched_CloseHandle),
+	                    "CloseHandle");
+	ok &= PatchIATEntry(IAT_RVA_DeviceIoControl,
+	                    reinterpret_cast<void*>(&Patched_DeviceIoControl),
+	                    "DeviceIoControl");
+	ok &= PatchIATEntry(IAT_RVA_ReadFile,
+	                    reinterpret_cast<void*>(&Patched_ReadFile),
+	                    "ReadFile");
 
 	ok &= PatchIATEntry(IAT_RVA_waveInGetNumDevs,
 	                    reinterpret_cast<void*>(&Patched_waveInGetNumDevs),
