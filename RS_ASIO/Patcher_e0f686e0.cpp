@@ -429,12 +429,31 @@ static BOOL WINAPI Patched_DeviceIoControl(
 {
 	if (hDevice == FAKE_KS_HANDLE)
 	{
+		// Log the input bytes so we can identify exactly which KS property is queried.
+		char inHex[128] = {};
+		if (lpInBuffer && nInBufferSize > 0)
+		{
+			const BYTE* p = reinterpret_cast<const BYTE*>(lpInBuffer);
+			DWORD logBytes = nInBufferSize < 32 ? nInBufferSize : 32;
+			char* dst = inHex;
+			for (DWORD i = 0; i < logBytes; ++i)
+				dst += snprintf(dst, 4, "%02x ", p[i]);
+		}
 		rslog::info_ts() << "Patched_DeviceIoControl (fake KS) - ioctl: 0x" << std::hex << dwIoControlCode << std::dec
-		                 << " inSize: " << nInBufferSize << " outSize: " << nOutBufferSize << std::endl;
-		// Fail gracefully — the game will fall back to another path or show the cable error.
-		// In a future iteration we can respond to specific KS IOCTLs here.
-		SetLastError(ERROR_NOT_SUPPORTED);
-		return FALSE;
+		                 << " inSize: " << nInBufferSize << " outSize: " << nOutBufferSize
+		                 << " in[" << inHex << "]" << std::endl;
+
+		// Return a single DWORD = 1 for all KS property queries on our fake handle.
+		// For KSPROPERTY_PIN_CTYPES this means "1 pin type" (the capture pin).
+		// For state/presence queries any non-zero value indicates the device is present/active.
+		DWORD result = 1;
+		if (lpBytesReturned) *lpBytesReturned = 0;
+		if (lpOutBuffer && nOutBufferSize >= sizeof(DWORD))
+		{
+			*reinterpret_cast<DWORD*>(lpOutBuffer) = result;
+			if (lpBytesReturned) *lpBytesReturned = sizeof(DWORD);
+		}
+		return TRUE;
 	}
 	return DeviceIoControl(hDevice, dwIoControlCode, lpInBuffer, nInBufferSize,
 	                       lpOutBuffer, nOutBufferSize, lpBytesReturned, lpOverlapped);
