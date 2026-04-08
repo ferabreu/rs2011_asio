@@ -423,11 +423,6 @@ static BOOL WINAPI Patched_CloseHandle(HANDLE hObject)
 	return CloseHandle(hObject);
 }
 
-// KSPROPSETID_Topology = {720D4AC0-7533-11D0-A5D6-28DB04C10000}
-// Used to identify topology size-probe calls so we handle the two-phase KS protocol correctly.
-static const GUID GUID_KSPROPSETID_Topology =
-    { 0x720D4AC0, 0x7533, 0x11D0, { 0xA5, 0xD6, 0x28, 0xDB, 0x04, 0xC1, 0x00, 0x00 } };
-
 static BOOL WINAPI Patched_DeviceIoControl(
 	HANDLE hDevice, DWORD dwIoControlCode, LPVOID lpInBuffer, DWORD nInBufferSize,
 	LPVOID lpOutBuffer, DWORD nOutBufferSize, LPDWORD lpBytesReturned, LPOVERLAPPED lpOverlapped)
@@ -448,47 +443,50 @@ static BOOL WINAPI Patched_DeviceIoControl(
 		                 << " inSize: " << nInBufferSize << " outSize: " << nOutBufferSize
 		                 << " in[" << inHex << "]" << std::endl;
 
-		// KSPROPSETID_Topology (KSPROPERTY_TOPOLOGY_NODES and _CONNECTIONS) uses the
-		// standard two-phase KS get-with-size protocol:
-		//   Phase 1: caller passes outSize=0 → driver returns FALSE+ERROR_MORE_DATA
-		//            and writes the required buffer size into *lpBytesReturned.
-		//   Phase 2: caller allocates that many bytes and calls again with real outSize.
-		// Returning TRUE+0 bytes for the size probe causes the caller to allocate 0 bytes,
-		// then call again still with outSize=0, and ultimately dereference garbage as a
-		// KSMULTIPLE_ITEM — crashing the game. Return ERROR_MORE_DATA instead.
+		// Many KS property gets use a two-phase size protocol:
+		//   Phase 1 (probe): caller passes outSize=0 → driver returns FALSE+ERROR_MORE_DATA
+		//                    and sets *lpBytesReturned to the needed buffer size.
+		//   Phase 2 (fetch): caller allocates that many bytes and calls again.
 		//
-		// We report an empty topology: sizeof(KSMULTIPLE_ITEM) = 8 bytes, Count = 0.
-		if (nInBufferSize >= sizeof(GUID) && lpInBuffer)
+		// This applies to ALL variable-length KS properties regardless of property set
+		// (KSPROPSETID_Topology connections/nodes, KSPROPSETID_Pin interfaces/mediums/
+		// dataranges, etc.). Returning TRUE+0 for a probe causes the caller to allocate
+		// 0 bytes, misparse the result as KSMULTIPLE_ITEM, and crash.
+		//
+		// Unified strategy by outSize:
+		//   outSize=0  → size probe for any variable-length property.
+		//                 Return ERROR_MORE_DATA and report sizeof(KSMULTIPLE_ITEM)=8 needed.
+		//   outSize=4  → fixed DWORD property (CTYPES, DATAFLOW, COMMUNICATION...).
+		//                 Return DWORD=1 (1 pin type / SINK / IN — sufficient for cable detection).
+		//   outSize≥8  → variable-length property with caller-provided buffer.
+		//                 Return an empty KSMULTIPLE_ITEM {Size=8, Count=0}.
+
+		static const ULONG KS_MULTIPLE_ITEM_SIZE = 2 * sizeof(ULONG); // Size + Count fields
+
+		if (nOutBufferSize == 0)
 		{
-			const GUID& propSet = *reinterpret_cast<const GUID*>(lpInBuffer);
-			if (IsEqualGUID(propSet, GUID_KSPROPSETID_Topology))
-			{
-				static const DWORD KS_MULTIPLE_ITEM_SIZE = 2 * sizeof(ULONG); // Size + Count fields
-				if (nOutBufferSize < KS_MULTIPLE_ITEM_SIZE)
-				{
-					// Size probe: tell the caller how many bytes are needed.
-					if (lpBytesReturned) *lpBytesReturned = KS_MULTIPLE_ITEM_SIZE;
-					SetLastError(ERROR_MORE_DATA);
-					return FALSE;
-				}
-				// Real call: return an empty KSMULTIPLE_ITEM (0 nodes / 0 connections).
-				ULONG* items = reinterpret_cast<ULONG*>(lpOutBuffer);
-				items[0] = KS_MULTIPLE_ITEM_SIZE; // Size (total bytes including this header)
-				items[1] = 0;                      // Count
-				if (lpBytesReturned) *lpBytesReturned = KS_MULTIPLE_ITEM_SIZE;
-				return TRUE;
-			}
+			// Size probe: tell the caller 8 bytes are needed (empty KSMULTIPLE_ITEM).
+			if (lpBytesReturned) *lpBytesReturned = KS_MULTIPLE_ITEM_SIZE;
+			SetLastError(ERROR_MORE_DATA);
+			return FALSE;
 		}
 
-		// Default: return a single DWORD = 1 for all other KS property queries.
-		// For KSPROPERTY_PIN_CTYPES this means "1 pin type" (the capture pin).
-		// For state/presence queries any non-zero value indicates the device is present/active.
-		if (lpBytesReturned) *lpBytesReturned = 0;
-		if (lpOutBuffer && nOutBufferSize >= sizeof(DWORD))
+		if (nOutBufferSize == sizeof(DWORD))
 		{
-			*reinterpret_cast<DWORD*>(lpOutBuffer) = 1;
+			// Single DWORD property.
+			if (lpOutBuffer) *reinterpret_cast<DWORD*>(lpOutBuffer) = 1;
 			if (lpBytesReturned) *lpBytesReturned = sizeof(DWORD);
+			return TRUE;
 		}
+
+		// Variable-length property: return empty KSMULTIPLE_ITEM {Size=8, Count=0}.
+		if (lpOutBuffer && nOutBufferSize >= KS_MULTIPLE_ITEM_SIZE)
+		{
+			ULONG* items = reinterpret_cast<ULONG*>(lpOutBuffer);
+			items[0] = KS_MULTIPLE_ITEM_SIZE;
+			items[1] = 0;
+		}
+		if (lpBytesReturned) *lpBytesReturned = KS_MULTIPLE_ITEM_SIZE;
 		return TRUE;
 	}
 	return DeviceIoControl(hDevice, dwIoControlCode, lpInBuffer, nInBufferSize,
