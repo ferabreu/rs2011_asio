@@ -4,7 +4,7 @@ This project aims to add ASIO support to Ubisoft's **Rocksmith**, allowing the g
 
 Rocksmith is different from Rocksmith 2014 in how it handles audio, and the original RS ASIO mod doesn't work with it. This project is a fork of RS ASIO, with changes to make it compatible with Rocksmith.
 
-Using Ubisoft's Real Tone Cable is still required. Rocksmith does not work without it. Because of that, the only practical purpose of this mod is to allow the game to run on Linux with ASIO support, which should improve audio latency and performance compared to using Wine's built-in audio drivers.
+Using Ubisoft's Real Tone Cable is still required. Rocksmith does not work without it. Because of that, the only practical purpose of this mod is to allow the game to run on Linux with WineASIO, which should improve audio latency and performance compared to using Wine's built-in audio drivers.
 
 ## How to use
 
