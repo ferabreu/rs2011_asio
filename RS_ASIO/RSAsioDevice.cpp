@@ -34,6 +34,8 @@ HRESULT STDMETHODCALLTYPE RSAsioDevice::QueryInterface(REFIID riid, void **ppvOb
 
 HRESULT STDMETHODCALLTYPE RSAsioDevice::Activate(REFIID iid, DWORD dwClsCtx, PROPVARIANT *pActivationParams, void **ppInterface)
 {
+	rslog::info_ts() << m_Id << " RSAsioDevice::Activate - iid: " << iid << " dwClsCtx: " << std::hex << dwClsCtx << std::endl;
+
 	if (!ppInterface)
 		return E_POINTER;
 

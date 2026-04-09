@@ -465,6 +465,11 @@ static BOOL WINAPI Patched_DeviceIoControl(
 		// The game checks Manufacturer (USB VID) and Product (USB PID) against the Real
 		// Tone Cable values before deciding to activate WASAPI capture. Any other value
 		// causes the game to silently skip capture for the entire session.
+		//
+		// KSPROPERTY_PIN_DATAFLOW (KSPROPSETID_Pin, Id=7) must return KSPIN_DATAFLOW_OUT=2
+		// for the capture device's streaming pin. The generic "return DWORD=1" path returns
+		// KSPIN_DATAFLOW_IN=1, which tells the game this is a render pin and causes it to
+		// skip the device for capture activation.
 		if (nInBufferSize >= sizeof(GUID) + sizeof(ULONG) && lpInBuffer)
 		{
 			const GUID& propSet = *reinterpret_cast<const GUID*>(lpInBuffer);
@@ -479,6 +484,19 @@ static BOOL WINAPI Patched_DeviceIoControl(
 				if (lpBytesReturned) *lpBytesReturned = sizeof(KsComponentId);
 				if (lpOutBuffer && nOutBufferSize >= sizeof(KsComponentId))
 					*reinterpret_cast<KsComponentId*>(lpOutBuffer) = compId;
+				return TRUE;
+			}
+
+			// KSPROPERTY_PIN_DATAFLOW (Id=7): must be KSPIN_DATAFLOW_OUT=2 for a capture pin.
+			// KSPROPSETID_Pin = {8C134960-51AD-11CF-878A-94F801C10000}
+			static const GUID GUID_KSPROPSETID_Pin =
+			    { 0x8C134960, 0x51AD, 0x11CF, { 0x87, 0x8A, 0x94, 0xF8, 0x01, 0xC1, 0x00, 0x00 } };
+			if (IsEqualGUID(propSet, GUID_KSPROPSETID_Pin) && propId == 7 /* KSPROPERTY_PIN_DATAFLOW */)
+			{
+				// KSPIN_DATAFLOW_OUT = 2: data flows out of the pin to the application (capture).
+				if (lpBytesReturned) *lpBytesReturned = sizeof(DWORD);
+				if (lpOutBuffer && nOutBufferSize >= sizeof(DWORD))
+					*reinterpret_cast<DWORD*>(lpOutBuffer) = 2;
 				return TRUE;
 			}
 		}
@@ -496,8 +514,8 @@ static BOOL WINAPI Patched_DeviceIoControl(
 		// Unified strategy by outSize:
 		//   outSize=0  → size probe for any variable-length property.
 		//                 Return ERROR_MORE_DATA and report sizeof(KSMULTIPLE_ITEM)=8 needed.
-		//   outSize=4  → fixed DWORD property (CTYPES, DATAFLOW, COMMUNICATION...).
-		//                 Return DWORD=1 (1 pin type / SINK / IN — sufficient for cable detection).
+		//   outSize=4  → fixed DWORD property (CTYPES, COMMUNICATION...).
+		//                 Return DWORD=1. DATAFLOW is intercepted above and returns 2 (OUT).
 		//   outSize≥8  → variable-length property with caller-provided buffer.
 		//                 Return an empty KSMULTIPLE_ITEM {Size=8, Count=0}.
 
