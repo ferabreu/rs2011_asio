@@ -374,6 +374,21 @@ static BOOL WINAPI Patched_SetupDiGetDeviceInterfaceAlias(
 		return SetupDiGetDeviceInterfaceAlias(DeviceInfoSet, DeviceInterfaceData,
 		    AliasInterfaceClassGuid, AliasDeviceInterfaceData);
 
+	// The cable is a capture-only USB device — it has no render filter.
+	// Returning TRUE for the render alias causes the game's pass-1 scan logic to classify
+	// this as a full-duplex device and skip it, so the WASAPI endpoint ID is never stored
+	// and capture activation never follows.  Return FALSE here so the game treats it as a
+	// capture-only device and proceeds to GetDeviceInterfaceDetailW + registry reads.
+	// KSCATEGORY_RENDER = {65E8773E-8F56-11D0-A3B9-00A0C9223196}
+	static const GUID GUID_KSCATEGORY_RENDER =
+	    { 0x65E8773E, 0x8F56, 0x11D0, { 0xA3, 0xB9, 0x00, 0xA0, 0xC9, 0x22, 0x31, 0x96 } };
+	if (AliasInterfaceClassGuid && IsEqualGUID(*AliasInterfaceClassGuid, GUID_KSCATEGORY_RENDER))
+	{
+		rslog::info_ts() << "  -> returning FALSE (cable has no render alias)" << std::endl;
+		SetLastError(ERROR_NOT_FOUND);
+		return FALSE;
+	}
+
 	// Report that the alias exists and is active so the game proceeds to GetDeviceInterfaceDetailW.
 	if (AliasDeviceInterfaceData)
 	{
@@ -535,6 +550,33 @@ static BOOL WINAPI Patched_DeviceIoControl(
 					*reinterpret_cast<DWORD*>(lpOutBuffer) = 1; // KSPIN_COMMUNICATION_SINK
 				return TRUE;
 			}
+			}
+		}
+
+		// KSPROPSETID_Connection = {720D4AC0-7533-11D0-A5D6-28DB04C10000}
+		// The outSize=8 cases below return specific typed values, not KSMULTIPLE_ITEM.
+		static const GUID GUID_KSPROPSETID_Connection =
+		    { 0x720D4AC0, 0x7533, 0x11D0, { 0xA5, 0xD6, 0x28, 0xDB, 0x04, 0xC1, 0x00, 0x00 } };
+		if (nInBufferSize >= sizeof(GUID) + sizeof(ULONG) && lpInBuffer &&
+		    IsEqualGUID(*reinterpret_cast<const GUID*>(lpInBuffer), GUID_KSPROPSETID_Connection))
+		{
+			const ULONG connPropId = *reinterpret_cast<const ULONG*>(
+			    reinterpret_cast<const BYTE*>(lpInBuffer) + sizeof(GUID));
+			if (connPropId == 2 /* KSPROPERTY_CONNECTION_STATE */ && nOutBufferSize >= sizeof(DWORD))
+			{
+				// KSSTATE_STOP = 0: pin is stopped (idle), not in an error condition.
+				if (lpOutBuffer) *reinterpret_cast<DWORD*>(lpOutBuffer) = 0;
+				if (lpBytesReturned) *lpBytesReturned = sizeof(DWORD);
+				return TRUE;
+			}
+			if (connPropId == 1 /* KSPROPERTY_CONNECTION_PRIORITY */ && nOutBufferSize >= 2 * sizeof(DWORD))
+			{
+				// KSPRIORITY_NORMAL = { PriorityClass=1, PrioritySubClass=0 }.
+				DWORD* prio = reinterpret_cast<DWORD*>(lpOutBuffer);
+				prio[0] = 1; // KSPRIORITY_NORMAL class
+				prio[1] = 0; // subclass
+				if (lpBytesReturned) *lpBytesReturned = 2 * sizeof(DWORD);
+				return TRUE;
 			}
 		}
 
