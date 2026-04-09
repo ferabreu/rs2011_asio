@@ -99,6 +99,23 @@ static const wchar_t FAKE_DEVICE_PATH[] =
 static const GUID GUID_KSCATEGORY_CAPTURE =
     { 0x65E8773D, 0x8F56, 0x11D0, { 0xA3, 0xB9, 0x00, 0xA0, 0xC9, 0x22, 0x31, 0x96 } };
 
+// KSPROPSETID_General = {1464EDA5-6A8F-11D1-9AA7-00A0C9223196}
+// Property KSPROPERTY_GENERAL_COMPONENTID=0 returns a fixed-size KSCOMPONENTID struct
+// (not a KSMULTIPLE_ITEM). The game checks Manufacturer and Product against the Real Tone
+// Cable VID/PID to confirm cable presence before activating WASAPI capture.
+static const GUID GUID_KSPROPSETID_General =
+    { 0x1464EDA5, 0x6A8F, 0x11D1, { 0x9A, 0xA7, 0x00, 0xA0, 0xC9, 0x22, 0x31, 0x96 } };
+
+// Mirrors KSCOMPONENTID from ks.h (Manufacturer, Product, Component, Name, Version, Revision).
+struct KsComponentId {
+    ULONG Manufacturer;
+    ULONG Product;
+    ULONG Component;
+    GUID  Name;
+    ULONG Version;
+    ULONG Revision;
+};
+
 // Patch a single IAT slot to point to replacementFn.
 // Patch_ReplaceWithBytes (from Patcher.h) handles page protection internally
 // via NtProtectVirtualMemory, bypassing any hook on VirtualProtect.
@@ -442,6 +459,29 @@ static BOOL WINAPI Patched_DeviceIoControl(
 		rslog::info_ts() << "Patched_DeviceIoControl (fake KS) - ioctl: 0x" << std::hex << dwIoControlCode << std::dec
 		                 << " inSize: " << nInBufferSize << " outSize: " << nOutBufferSize
 		                 << " in[" << inHex << "]" << std::endl;
+
+		// KSPROPERTY_GENERAL_COMPONENTID (KSPROPSETID_General, Id=0) is a fixed-size
+		// property returning a KSCOMPONENTID struct — NOT a KSMULTIPLE_ITEM.
+		// The game checks Manufacturer (USB VID) and Product (USB PID) against the Real
+		// Tone Cable values before deciding to activate WASAPI capture. Any other value
+		// causes the game to silently skip capture for the entire session.
+		if (nInBufferSize >= sizeof(GUID) + sizeof(ULONG) && lpInBuffer)
+		{
+			const GUID& propSet = *reinterpret_cast<const GUID*>(lpInBuffer);
+			const ULONG propId  = *reinterpret_cast<const ULONG*>(
+			    reinterpret_cast<const BYTE*>(lpInBuffer) + sizeof(GUID));
+			if (IsEqualGUID(propSet, GUID_KSPROPSETID_General) && propId == 0)
+			{
+				KsComponentId compId = {};
+				compId.Manufacturer = 0x12BA;  // Mad Catz / Real Tone Cable USB VID
+				compId.Product      = 0x00FF;  // Real Tone Cable USB PID
+				compId.Version      = 1;
+				if (lpBytesReturned) *lpBytesReturned = sizeof(KsComponentId);
+				if (lpOutBuffer && nOutBufferSize >= sizeof(KsComponentId))
+					*reinterpret_cast<KsComponentId*>(lpOutBuffer) = compId;
+				return TRUE;
+			}
+		}
 
 		// Many KS property gets use a two-phase size protocol:
 		//   Phase 1 (probe): caller passes outSize=0 → driver returns FALSE+ERROR_MORE_DATA
